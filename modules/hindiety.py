@@ -15,6 +15,8 @@ import web
 url = 'http://www.shabdkosh.com/s?e=%s&t=1'
 r_inl = re.compile(r'([^<]+)<')
 r_speech = re.compile(r'(?i)h3 class="([^"]+)">\1\&nbsp;')
+r_gender = re.compile(r'(?i)<span title="Gender">([^<]+)</span>')
+r_html   = re.compile(r'(?i)<[^>]+>')
 
 term = None
 speech = None
@@ -77,10 +79,23 @@ def init (jenni, bytes):
         aline = '==|=='.join(definition)
         a_speech = r_speech.findall(aline)
         if len(a_speech) > 0:
-            t_speech = a_speech[0]
+            a_speech_clean = a_speech[0].strip()
+
+            # only whitespace?
+            if a_speech_clean <> '':
+                t_speech_tmp = t_speech
+                t_speech = a_speech_clean
+
+                # was there a change from '' -> something
+                if t_speech_tmp == '' and t_speech <> '':
+                    continue
+
+        if t_speech == '':
+            continue
 
         if not t_speech in out_hash:
             out_hash[t_speech] = 0
+
         # do not print more than 5 in
         # any speech category
         if out_hash[t_speech] == 5:
@@ -95,19 +110,30 @@ def init (jenni, bytes):
         definition_term = definition[0]
         definition_term = definition_term.decode('utf-8')
 
+        definition_gender = r_gender.findall(line)
+        if definition_gender:
+            definition_gender = definition_gender[0]
+            definition_gender = r_html.sub('', definition_gender)
+            definition_gender = '(' + definition_gender + ') '
+        else:
+            definition_gender = ''
+
         definition_latin = None
-        
-        if len(definition) >= 4:
-            if definition[2] == 'span class="latin">':
-                definition_latin = definition[3]
-                definition_latin = definition_latin[3:]
+        definition_latin_idx = 3
+        if definition_gender <> '':
+            definition_latin_idx = 5
+
+        if len(definition) >= 6:
+            if definition[definition_latin_idx - 1] == 'span class="latin">':
+                definition_latin = definition[definition_latin_idx]
+                definition_latin = definition_latin.replace('br>', '')
                 definition_latin = definition_latin.decode('utf-8')
 
         if definition_latin is None:
-            output.append(u'\x02%s:\x02 %s' % (t_speech, definition_term))
+            output.append(u'\x02%s:\x02 %s%s' % (t_speech, definition_gender, definition_term))
         else:
-            output.append(u'\x02%s:\x02 %s (%s)' % \
-                    (t_speech, definition_term, definition_latin))
+            output.append(u'\x02%s:\x02 %s%s (%s)' % \
+                    (t_speech, definition_gender, definition_term, definition_latin))
 
         out_hash[t_speech] = out_hash[t_speech] + 1
 
