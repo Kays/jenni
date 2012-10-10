@@ -43,7 +43,9 @@ def service(jenni, input, command, args):
     lines = bytes.splitlines()
     if not lines:
         return jenni.reply("Sorry, the service didn't respond any output.")
-    jenni.say(lines[0][:350])
+    try: line = lines[0].encode('utf-8')[:350]
+    except: line = lines[0][:250]
+    jenni.say(line)
 
 def refresh(jenni):
     if hasattr(jenni.config, 'services'):
@@ -97,6 +99,7 @@ o.commands = ['o']
 o.example = '.o servicename arg1 arg2 arg3'
 o.services = {}
 o.serviceURI = None
+o.rate = 20
 
 def snippet(jenni, input):
     if not o.services:
@@ -112,6 +115,7 @@ def snippet(jenni, input):
           "'&quot;', '\x22')), convertEntities=True)"
     service(jenni, input, 'py', py)
 snippet.commands = ['snippet']
+snippet.rate = 20
 
 if __name__ == '__main__':
     print __doc__.strip()

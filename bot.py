@@ -2,12 +2,15 @@
 """
 bot.py - Jenni IRC Bot
 Copyright 2008, Sean B. Palmer, inamidst.com
+Modified by: Michael Yanovich
 Licensed under the Eiffel Forum License 2.
 
-http://inamidst.com/phenny/
+More info:
+ * Jenni: https://github.com/myano/jenni/
+ * Phenny: http://inamidst.com/phenny/
 """
 
-import sys, os, re, threading, imp
+import time, sys, os, re, threading, imp
 import irc
 
 home = os.getcwd()
@@ -22,11 +25,18 @@ def decode(bytes):
 
 class Jenni(irc.Bot):
     def __init__(self, config):
-        args = (config.nick, config.name, config.channels, config.password)
+        if hasattr(config, "logchan_pm"): lc_pm = config.logchan_pm
+        else: lc_pm = None
+        if hasattr(config, "logging"): logging = config.logging
+        else: logging = False
+        args = (config.nick, config.name, config.channels, config.password, lc_pm, logging)
         irc.Bot.__init__(self, *args)
         self.config = config
         self.doc = {}
         self.stats = {}
+        self.times = {}
+        if hasattr(config, 'excludes'):
+            self.excludes = config.excludes
         self.setup()
 
     def setup(self):
@@ -110,6 +120,12 @@ class Jenni(irc.Bot):
             if not hasattr(func, 'event'):
                 func.event = 'PRIVMSG'
             else: func.event = func.event.upper()
+
+            if not hasattr(func, 'rate'):
+                if hasattr(func, 'commands'):
+                    func.rate = 0
+                else:
+                    func.rate = 0
 
             if hasattr(func, 'rule'):
                 if isinstance(func.rule, str):
@@ -197,7 +213,32 @@ class Jenni(irc.Bot):
         return CommandInput(text, origin, bytes, match, event, args)
 
     def call(self, func, origin, jenni, input):
-        try: func(jenni, input)
+        nick = (input.nick).lower()
+        if nick in self.times:
+            if func in self.times[nick]:
+                if not input.admin:
+                    if time.time() - self.times[nick][func] < func.rate:
+                        self.times[nick][func] = time.time()
+                        return
+        else: self.times[nick] = dict()
+        self.times[nick][func] = time.time()
+        try:
+            if hasattr(self, 'excludes'):
+                if input.sender in self.excludes:
+                    if '!' in self.excludes[input.sender]:
+                        # block all function calls for this channel
+                        return
+                    fname = func.func_code.co_filename.split('/')[-1].split('.')[0]
+                    if fname in self.excludes[input.sender]:
+                        # block function call if channel is blacklisted
+                        print 'Blocked:', input.sender, func.name, func.func_code.co_filename
+                        return
+        except Exception, e:
+            print "Error attempting to block:", str(func.name)
+            self.error(origin)
+
+        try:
+            func(jenni, input)
         except Exception, e:
             self.error(origin)
 
@@ -226,6 +267,9 @@ class Jenni(irc.Bot):
                         jenni = self.wrapped(origin, text, match)
                         input = self.input(origin, text, bytes, match, event, args)
 
+                        nick = (input.nick).lower()
+
+                        # blocking ability
                         if os.path.isfile("blocks"):
                             g = open("blocks", "r")
                             contents = g.readlines()
@@ -237,23 +281,33 @@ class Jenni(irc.Bot):
                             try: bad_nicks = contents[1].split(',')
                             except: bad_nicks = ['']
 
+                            # check for blocked hostmasks
                             if len(bad_masks) > 0:
+                                host = origin.host
+                                host = host.lower()
                                 for hostmask in bad_masks:
-                                    hostmask = hostmask.replace("\n", "")
+                                    hostmask = hostmask.replace("\n", "").strip()
                                     if len(hostmask) < 1: continue
-                                    re_temp = re.compile(hostmask)
-                                    host = origin.host
-                                    host = host.lower()
-                                    if re_temp.findall(host) or hostmask in host:
-                                        return
+                                    try:
+                                        re_temp = re.compile(hostmask)
+                                        if re_temp.findall(host):
+                                            return
+                                    except:
+                                        if hostmask in host:
+                                            return
+                            # check for blocked nicks
                             if len(bad_nicks) > 0:
                                 for nick in bad_nicks:
-                                    nick = nick.replace("\n", "")
+                                    nick = nick.replace("\n", "").strip()
                                     if len(nick) < 1: continue
-                                    re_temp = re.compile(nick)
-                                    if re_temp.findall(input.nick) or nick in input.nick:
-                                        return
-
+                                    try:
+                                        re_temp = re.compile(nick)
+                                        if re_temp.findall(input.nick):
+                                            return
+                                    except:
+                                        if nick in input.nick:
+                                            return
+                        # stats
                         if func.thread:
                             targs = (func, origin, jenni, input)
                             t = threading.Thread(target=self.call, args=targs)

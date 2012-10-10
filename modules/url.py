@@ -16,6 +16,7 @@ import re
 from htmlentitydefs import name2codepoint
 import unicode
 import urllib2
+import socket
 import web
 
 # Place a file in your ~/jenni/ folder named, bitly.txt
@@ -27,12 +28,15 @@ import web
 # this variable is to determine when to use bitly. If the URL is more
 # than this length, it'll display a bitly URL instead. To disable bit.ly, put None
 # even if it's set to None, triggering .bitly command will still work!
-BITLY_TRIGGER_LEN = 65
+BITLY_TRIGGER_LEN = 60
 EXCLUSION_CHAR = "!"
 IGNORE = ["git.io"]
 
 # do not edit below this line unless you know what you're doing
 bitly_loaded = 0
+
+IPv6_HOST = urllib2.urlopen('http://ipv6.icanhazip.com').read().strip()
+IPv4_HOST = urllib2.urlopen('http://ipv4.icanhazip.com').read().strip()
 
 try:
     file = open("bitly.txt", "r")
@@ -45,7 +49,7 @@ try:
 except:
     print "ERROR: No bitly.txt found."
 
-url_finder = re.compile(r'(?u)(%s?(http|https|ftp)(://\S+))' % (EXCLUSION_CHAR))
+url_finder = re.compile(r'(?u)(%s?(http|https|ftp)?(:?/?/?\S+\.\S+/?\S+?))' % (EXCLUSION_CHAR))
 r_entity = re.compile(r'&[A-Za-z0-9#]+;')
 INVALID_WEBSITE = 0x01
 
@@ -99,8 +103,7 @@ def find_title(url):
             return "Too many re-directs."
 
     try: mtype = info['content-type']
-    except:
-        return
+    except: return
     if not (('/html' in mtype) or ('/xhtml' in mtype)):
         return
 
@@ -158,6 +161,8 @@ def find_title(url):
 
     if title:
         return title
+    else:
+        return 'No title'
 
 def short(text):
     """
@@ -165,8 +170,9 @@ def short(text):
     The return type is a list.
     """
 
-    if not bitly_loaded: return [ ]
-    bitlys = [ ]
+    if not bitly_loaded: return list()
+    if not text: return list()
+    bitlys = list()
     try:
         a = re.findall(url_finder, text)
         k = len(a)
@@ -201,7 +207,17 @@ def displayBitLy (jenni, url, shorten):
     u = getTLD(url)
     jenni.say('%s  -  %s' % (u, shorten))
 
+def remove_nonprint(text):
+    new = str()
+    for char in text:
+        x = ord(char)
+        if x > 32 and x < 126:
+            new += char
+    return new
+
 def getTLD (url):
+    url = url.strip()
+    url = remove_nonprint(url)
     idx = 7
     if url.startswith('https://'): idx = 8
     elif url.startswith('ftp://'): idx = 6
@@ -209,20 +225,37 @@ def getTLD (url):
     f = u.find('/')
     if f == -1: u = url
     else: u = url[0:idx] + u[0:f]
-    return u
+    return remove_nonprint(u)
 
 def doUseBitLy (url):
     return bitly_loaded and BITLY_TRIGGER_LEN is not None and len(url) > BITLY_TRIGGER_LEN
 
 def get_results(text):
+    if not text: return list()
     a = re.findall(url_finder, text)
     k = len(a)
     i = 0
-    display = [ ]
+    display = list()
     while i < k:
         url = unicode.encode(a[i][0])
         url = unicode.decode(url)
         url = unicode.iriToUri(url)
+        url = remove_nonprint(url)
+        domain = getTLD(url)
+        if "//" in domain:
+            domain = domain.split('//')[1]
+        try:
+            ips = socket.getaddrinfo(domain, 80, 0, 0, socket.SOL_TCP)
+        except:
+            i += 1
+            continue
+        localhost = False
+        for x in ips:
+            y = x[4][0]
+            if y.startswith('127') or '::1' == y or '0:0:0:0:0:0:0:1' == y:
+                localhost = True
+                break
+        if localhost: break
         if not url.startswith(EXCLUSION_CHAR):
             try:
                 page_title = find_title(url)
@@ -232,6 +265,9 @@ def get_results(text):
                 bitly = short(url)
                 bitly = bitly[0][1]
             else: bitly = url
+            if page_title:
+                if IPv4_HOST in page_title or IPv6_HOST in page_title:
+                    break
             display.append([page_title, url, bitly])
         i += 1
     return display
@@ -260,10 +296,10 @@ show_title_auto.rule = '(?u).*(%s?(http|https)(://\S+)).*' % (EXCLUSION_CHAR)
 show_title_auto.priority = 'high'
 
 def show_title_demand (jenni, input):
-    #try:
-    results = get_results(input)
-    #except: return
-    if results is None: return
+    results = get_results(input.group(2))
+    if results is None:
+        jenni.reply('No title found.')
+        return
 
     for r in results:
         if r[0] is None: continue

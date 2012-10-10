@@ -18,19 +18,24 @@ import time
 from modules import url as url_module
 
 DEBUG = False
-socket.setdefaulttimeout(10)
-INTERVAL = 60  # seconds between checking for new updates
+socket.setdefaulttimeout(30)
+INTERVAL = 600  # seconds between checking for new updates
 STOP = False
-dupes = dict()
+
+
+def checkdb(cursor):
+    cursor.execute("CREATE TABLE IF NOT EXISTS rss ( channel text,\
+            site_name text, site_url text, fg text, bg text)")
 
 
 def manage_rss(jenni, input):
-    """ .rss operation channel site_name url -- operation can be either 'add', 'del', or 'list' no further operators needed if 'list' used """
+    """.rss operation channel site_name url -- 'add', 'del', or 'list' rss"""
     if not input.admin:
         jenni.reply("Sorry, you need to be an admin to modify the RSS feeds.")
+        return
     conn = sqlite3.connect('rss.db')
     c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS rss ( channel text, site_name text, site_url text, modified text, fg text, bg text )")
+    checkdb(c)
     conn.commit()
 
     text = input.group().split()
@@ -67,7 +72,8 @@ def manage_rss(jenni, input):
             fg_colour = fg_colour.zfill(2)
         if bg_colour:
             bg_colour = bg_colour.zfill(2)
-        c.execute("INSERT INTO rss VALUES (?,?,?,?,?,?)", (channel, site_name, site_url, "time", fg_colour, bg_colour))
+        c.execute("INSERT INTO rss VALUES (?,?,?,?,?)", (channel, site_name,
+            site_url, fg_colour, bg_colour))
         conn.commit()
         c.close()
         jenni.reply("Successfully added values to database.")
@@ -79,7 +85,8 @@ def manage_rss(jenni, input):
         jenni.reply("Successfully removed values from database.")
     elif len(text) >= 4 and text[1] == 'del':
         # .rss del ##channel Site_Name
-        c.execute("DELETE FROM rss WHERE channel = ? and site_name = ?", (channel, " ".join(text[3:]),))
+        c.execute("DELETE FROM rss WHERE channel = ? and site_name = ?",
+                (channel, " ".join(text[3:]),))
         conn.commit()
         c.close()
         jenni.reply("Successfully removed the site from the given channel.")
@@ -108,76 +115,90 @@ feeds = dict()
 
 def read_feeds(jenni):
     global restarted
+    global STOP
+
     restarted = False
     conn = sqlite3.connect('rss.db')
     c = conn.cursor()
+    checkdb(c)
     c.execute("SELECT * FROM rss")
+    if not c.fetchall():
+        STOP = True
+        jenni.say("No RSS feeds found in database. Please add some rss feeds.")
+
+    c.execute("SELECT * FROM rss")
+    conn_recent = sqlite3.connect('recent_rss.db')
+    cursor_recent = conn_recent.cursor()
+    cursor_recent.execute("CREATE TABLE IF NOT EXISTS recent ( channel text, site_name text, article_title text, article_url text )")
+    conn_recent.commit()
 
     for row in c:
         feed_channel = row[0]
         feed_site_name = row[1]
         feed_url = row[2]
-        feed_fg = row[4]
-        feed_bg = row[5]
+        feed_fg = row[3]
+        feed_bg = row[4]
         try:
             fp = feedparser.parse(feed_url)
-        except IOError, E:
-            jenni.say("Can't parse, " + str(E))
+        except:
+            jenni.say("Can't parse.")
+
         try:
             entry = fp.entries[0]
+        except:
+            jenni.say("row: " + str(row))
+            jenni.say("Can't find element: " + str(fp))
+            continue
 
-            if not feed_fg and not feed_bg:
-                site_name_effect = "[\x02%s\x02]" % (feed_site_name)
-            elif feed_fg and not feed_bg:
-                site_name_effect = "[\x02\x03%s%s\x03\x02]" % (feed_fg, feed_site_name)
-            elif feed_fg and feed_bg:
-                site_name_effect = "[\x02\x03%s,%s%s\x03\x02]" % (feed_fg, feed_bg, feed_site_name)
+        if not feed_fg and not feed_bg:
+            site_name_effect = "[\x02%s\x02]" % (feed_site_name)
+        elif feed_fg and not feed_bg:
+            site_name_effect = "[\x02\x03%s%s\x03\x02]" % (feed_fg, feed_site_name)
+        elif feed_fg and feed_bg:
+            site_name_effect = "[\x02\x03%s,%s%s\x03\x02]" % (feed_fg, feed_bg, feed_site_name)
 
-            #if not feed_modified == entry.updated:
-            if feed_channel not in dupes:
-                dupes[feed_channel] = dict()
-            if feed_site_name not in dupes[feed_channel]:
-                dupes[feed_channel][feed_site_name] = list()
-            if entry.title not in dupes[feed_channel][feed_site_name]:
-                dupes[feed_channel][feed_site_name].append(entry.title)
-                if entry.id:
-                    article_url = entry.id
-                elif entry.feedburner_origlink:
-                    article_url = entry.feedburner_origlink
-                else:
-                    article_url = entry.links[0].href
+        try:
+            article_url = entry.link
+        except:
+            print "Something went wrong"
+            print str(entry)
+            continue
 
-                short_url = url_module.short(article_url)
+        # only print if new entry
+        sql_text = (feed_channel, feed_site_name, entry.title, article_url)
+        cursor_recent.execute("SELECT * FROM recent WHERE channel = ? AND site_name = ? and article_title = ? AND article_url = ?", sql_text)
+        if len(cursor_recent.fetchall()) < 1:
+            short_url = url_module.short(article_url)
 
-                if short_url:
-                    short_url = short_url[0][1][:-1]
-                else:
-                    short_url = article_url
+            try:
+                short_url = short_url[0][1][:-1]
+            except:
+                short_url = article_url
 
-                response = site_name_effect + " %s \x02%s\x02" % (entry.title, short_url)
-                if entry.updated:
-                    response += " - %s" % (entry.updated)
+            response = site_name_effect + " %s \x02%s\x02" % (entry.title, short_url)
+            if entry.updated:
+                response += " - %s" % (entry.updated)
 
-                jenni.msg(feed_channel, response)
+            jenni.msg(feed_channel, response)
 
-                t = (entry.updated, feed_channel, feed_site_name, feed_url,)
-                c.execute("UPDATE rss SET modified = ? WHERE channel = ? AND site_name = ? AND site_url = ?", t)
-                conn.commit()
-                c.close()
-            else:
-                if DEBUG:
-                    jenni.msg(feed_channel, u"Skipping previously read entry: %s %s" % (site_name_effect, entry.title))
-        except Exception, E:
+            t = (feed_channel, feed_site_name, entry.title, article_url,)
+            cursor_recent.execute("INSERT INTO recent VALUES (?, ?, ?, ?)", t)
+            conn_recent.commit()
+            conn.commit()
+        else:
             if DEBUG:
-                jenni.say(str(E))
+                jenni.msg(feed_channel, u"Skipping previously read entry: %s %s" % (site_name_effect, entry.title))
+    cursor_recent.close()
     c.close()
 
 
 def startrss(jenni, input):
-    """ Begin reading RSS feeds """
+    """Begin reading RSS feeds"""
     if not input.admin:
         jenni.reply("You must be an admin to start up the RSS feeds.")
+        return
     global first_run, restarted, DEBUG, INTERVAL, STOP
+    DEBUG = False
 
     query = input.group(2)
     if query == '-v':
@@ -207,7 +228,7 @@ def startrss(jenni, input):
     if not STOP:
         while True:
             if STOP:
-                jenni.say("STOPPED")
+                jenni.reply("STOPPED")
                 first_run = False
                 STOP = False
                 break
