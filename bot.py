@@ -88,6 +88,9 @@ class Jenni(irc.Bot):
             if hasattr(obj, 'commands') or hasattr(obj, 'rule'):
                 self.variables[name] = obj
 
+    def unregister (self, module):
+        del self.variables[module]
+
     def bind_commands(self):
         self.commands = {'high': {}, 'medium': {}, 'low': {}}
 
