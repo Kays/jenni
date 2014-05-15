@@ -1,38 +1,76 @@
 #!/usr/bin/env python
+# vim: set fileencoding=UTF-8 :
 """
-weather.py - Jenni Weather Module
-Copyright 2008, Sean B. Palmer, inamidst.com
+weather.py - jenni Weather Module
+Copyright 2009-2013, Michael Yanovich (yanovich.net)
+Copyright 2008-2013, Sean B. Palmer (inamidst.com)
 Licensed under the Eiffel Forum License 2.
 
-http://inamidst.com/phenny/
+More info:
+ * jenni: https://github.com/myano/jenni/
+ * Phenny: http://inamidst.com/phenny/
 """
 
-import re, urllib
+import json
+import re
+import urllib
 import web
 from tools import deprecated
+from modules import latex
+from modules import unicode as uc
+from icao import data
 
 r_from = re.compile(r'(?i)([+-]\d+):00 from')
+r_tag = re.compile(r'<(?!!)[^>]+>')
+re_line = re.compile('<small>1</small>(.*)')
+re_lat = re.compile('<span class="latitude">(\S+)</span>')
+re_long = re.compile('<span class="longitude">(\S+)</span>')
+cnty = re.compile('<a href="/countries/\S+\.html">(.+)</a>')
+city = re.compile('<a href="/maps/\S+">(.+)</a>')
+
+
+def clean(txt):
+    '''Remove HTML entities from a given text'''
+    return r_tag.sub('', txt)
+
 
 def location(name):
     name = urllib.quote(name.encode('utf-8'))
-    uri = 'http://ws.geonames.org/searchJSON?q=%s&maxRows=1' % name
-    for i in xrange(10):
-        u = urllib.urlopen(uri)
-        if u is not None: break
-    bytes = u.read()
-    u.close()
+    uri = "http://www.geonames.org/search.html?q=%s" % (name)
+    if re.match('\d{5}', name):
+        uri += '&country=us'
+    page = web.get(uri)
 
-    results = web.json(bytes)
-    try: name = results['geonames'][0]['name']
-    except IndexError:
-        return '?', '?', '0', '0'
-    countryName = results['geonames'][0]['countryName']
-    lat = results['geonames'][0]['lat']
-    lng = results['geonames'][0]['lng']
+    unknown = ('?', '?', '0', '0')
+
+    line = re_line.findall(page)
+    if not line:
+        return unknown
+    line = line[0]
+
+    find_lat = re_lat.findall(line)
+
+    find_lng = re_long.findall(line)
+
+    find_cnty = cnty.findall(line)
+
+    find_city = city.findall(line)
+
+
+    if find_lng and find_lat and find_cnty and find_city:
+        name = clean(find_city[0])
+        countryName = clean(find_cnty[0])
+        lat = clean(find_lat[0])
+        lng = clean(find_lng[0])
+    else:
+        return unknown
+
     return name, countryName, lat, lng
+
 
 class GrumbleError(object):
     pass
+
 
 def local(icao, hour, minute):
     uri = ('http://www.flightstats.com/' +
@@ -47,52 +85,92 @@ def local(icao, hour, minute):
         lhour = lhour % 24
         return (str(lhour) + ':' + str(minute) + ', ' + str(hour) +
                   str(minute) + 'Z')
-        # return (str(lhour) + ':' + str(minute) + ' (' + str(hour) +
-        #            ':' + str(minute) + 'Z)')
     return str(hour) + ':' + str(minute) + 'Z'
 
-def code(jenni, search):
-    from icao import data
 
-    if search.upper() in [loc[0] for loc in data]:
+def code(jenni, search):
+
+    if search.upper() in data:
         return search.upper()
     else:
         name, country, latitude, longitude = location(search)
         if name == '?': return False
         sumOfSquares = (99999999999999999999999999999, 'ICAO')
-        for icao_code, lat, lon in data:
-            latDiff = abs(latitude - lat)
-            lonDiff = abs(longitude - lon)
+        for icao_code in data:
+            lat = float(data[icao_code][0])
+            lon = float(data[icao_code][1])
+            latDiff = abs(float(latitude) - float(lat))
+            lonDiff = abs(float(longitude) - float(lon))
             diff = (latDiff * latDiff) + (lonDiff * lonDiff)
             if diff < sumOfSquares[0]:
                 sumOfSquares = (diff, icao_code)
         return sumOfSquares[1]
 
-@deprecated
-def f_weather(self, origin, match, args):
-    """.weather <ICAO> - Show the weather at airport with the code <ICAO>."""
-    if origin.sender == '#talis':
-        if args[0].startswith('.weather '): return
 
-    icao_code = match.group(2)
-    if not icao_code:
-        return self.msg(origin.sender, 'Try .weather London, for example?')
-
-    icao_code = code(self, icao_code)
-
-    if not icao_code:
-        self.msg(origin.sender, 'No ICAO code found, sorry')
-        return
+def get_metar(icao_code):
+    '''Obtain METAR data from NOAA for a given ICAO code'''
 
     uri = 'http://weather.noaa.gov/pub/data/observations/metar/stations/%s.TXT'
-    try: bytes = web.get(uri % icao_code)
+
+    try:
+        page = web.get(uri % icao_code)
     except AttributeError:
         raise GrumbleError('OH CRAP NOAA HAS GONE DOWN THE WEB IS BROKEN')
-    if 'Not Found' in bytes:
-        self.msg(origin.sender, icao_code+': no such ICAO code, or no NOAA data')
-        return
+    if 'Not Found' in page:
+        return False, icao_code + ': no such ICAO code, or no NOAA data.'
 
-    metar = bytes.splitlines().pop()
+    return True, page
+
+
+def get_icao(jenni, inc, command='weather'):
+    '''Provide the ICAO code for a given input'''
+
+    if not inc:
+        return False, 'Try .%s London, for example?' % (command)
+
+    icao_code = code(jenni, inc)
+
+    if not icao_code:
+        return False, 'No ICAO code found, sorry.'
+
+    return True, icao_code
+
+
+def show_metar(jenni, input):
+    '''.metar <location> -- shows the raw METAR data for a given location'''
+    txt = input.group(2)
+
+    if not txt:
+        return jenni.say('Try .metar London, for example?')
+
+    status, icao_code = get_icao(jenni, txt, 'metar')
+    if not status:
+        return jenni.say(icao_code)
+
+    status, metar = get_metar(icao_code)
+    if not status:
+        return jenni.say(metar)
+
+    return jenni.say(metar)
+show_metar.commands = ['metar']
+show_metar.example = '.metar London'
+show_metar.priority = 'low'
+
+
+def f_weather(jenni, input):
+    """.weather <ICAO> - Show the weather at airport with the code <ICAO>."""
+
+    text = input.group(2)
+
+    status, icao_code = get_icao(jenni, text)
+    if not status:
+        return jenni.say(icao_code)
+
+    status, page = get_metar(icao_code)
+    if not status:
+        return jenni.say(page)
+
+    metar = page.splitlines().pop()
     metar = metar.split(' ')
 
     if len(metar[0]) == 4:
@@ -106,7 +184,7 @@ def f_weather(self, origin, match, args):
     if metar[0] == 'AUTO':
         metar = metar[1:]
     if metar[0] == 'VCU':
-        self.msg(origin.sender, icao_code + ': no data provided')
+        jenni.say(icao_code + ': no data provided')
         return
 
     if metar[0].endswith('KT'):
@@ -149,8 +227,7 @@ def f_weather(self, origin, match, args):
         metar = metar[1:]
 
     if not metar:
-        self.msg(origin.sender, icao_code + ': no data provided')
-        return
+        return jenni.say(icao_code + ': no data provided')
 
     cover = []
     while (metar[0].startswith('VV') or metar[0].startswith('SKC') or
@@ -160,8 +237,7 @@ def f_weather(self, origin, match, args):
         cover.append(metar[0])
         metar = metar[1:]
         if not metar:
-            self.msg(origin.sender, icao_code + ': no data provided')
-            return
+            return jenni.say(icao_code + ': no data provided')
 
     if metar[0] == 'CAVOK':
         cover.append('CLR')
@@ -194,8 +270,14 @@ def f_weather(self, origin, match, args):
         time = local(icao_code, hour, minute)
     else: time = '(time unknown)'
 
+    speed = False
+
     if wind:
-        speed = int(wind[3:5])
+        try:
+            speed = float(wind[3:5])
+        except:
+            speed = 0
+
         if speed < 1:
             description = 'Calm'
         elif speed < 4:
@@ -243,13 +325,16 @@ def f_weather(self, origin, match, args):
             degrees = u'\u2196'.encode('utf-8')
 
         if not icao_code.startswith('EN') and not icao_code.startswith('ED'):
-            wind = '%s %skt (%s)' % (description, speed, degrees)
+            ## for any part of the world except Germany and Norway
+            wind = '%s %.1fkt (%s)' % (description, speed, degrees)
         elif icao_code.startswith('ED'):
-            kmh = int(round(speed * 1.852, 0))
-            wind = '%s %skm/h (%skt) (%s)' % (description, kmh, speed, degrees)
+            ## Germany
+            kmh = float(speed * 1.852)
+            wind = '%s %.1fkm/h (%.1fkt) (%s)' % (description, kmh, speed, degrees)
         elif icao_code.startswith('EN'):
-            ms = int(round(speed * 0.514444444, 0))
-            wind = '%s %sm/s (%skt) (%s)' % (description, ms, speed, degrees)
+            ## Norway
+            ms = float(speed * 0.514444444)
+            wind = '%s %.1fm/s (%.1fkt) (%s)' % (description, ms, speed, degrees)
     else: wind = '(wind unknown)'
 
     if visibility:
@@ -288,34 +373,62 @@ def f_weather(self, origin, match, args):
 
     if temp:
         if '/' in temp:
-            temp = temp.split('/')[0]
+            t = temp.split('/')
+            temp = t[0]
+            dew = t[1]
         else: temp = temp.split('.')[0]
         if temp.startswith('M'):
             temp = '-' + temp[1:]
-        try: temp = int(temp)
-        except ValueError: temp = '?'
-    else: temp = '?'
+        if dew.startswith('M'):
+            dew = '-' + dew[1:]
+        try:
+            temp = float(temp)
+            dew = float(dew)
+        except ValueError:
+            temp = '?'
+            dew = '?'
+    else:
+        temp = '?'
+        dew = '?'
+
+    windchill = False
+    if isinstance(temp, float) and isinstance(speed, float) and temp <= 10.0 and speed > 0:
+        speed_kmh = speed * 1.852
+        windchill = 13.12 + (0.6215 * temp) - (11.37 * (speed_kmh ** (0.16))) + (0.3965 * temp * (speed_kmh ** (0.16)))
+        windchill = float(windchill)
+        f = (windchill * 1.8) + 32
+        if icao_code.startswith('K'):
+            ## if in North America
+            windchill = u'%.1f\u00B0F (%.1f\u00B0C)'.encode('utf-8') % (f, windchill)
+        else:
+            windchill = u'%.1f\u00B0C'.encode('utf-8') % (windchill)
 
     if pressure:
         if pressure.startswith('Q'):
             pressure = pressure.lstrip('Q')
             if pressure != 'NIL':
-                pressure = str(int(pressure)) + 'mb'
+                pressure = str(float(pressure)) + 'mb'
             else: pressure = '?mb'
         elif pressure.startswith('A'):
             pressure = pressure.lstrip('A')
             if pressure != 'NIL':
                 inches = pressure[:2] + '.' + pressure[2:]
-                mb = int(float(inches) * 33.7685)
-                pressure = '%sin (%smb)' % (inches, mb)
+                mb = float(inches) * 33.7685
+                pressure = '%sin (%.2fmb)' % (inches, mb)
             else: pressure = '?mb'
 
-            if isinstance(temp, int):
-                f = round((temp * 1.8) + 32, 2)
-                temp = u'%s\u2109 (%s\u2103)'.encode('utf-8') % (f, temp)
+            if isinstance(temp, float):
+                f = (temp * 1.8) + 32
+                temp = u'%.1f\u00B0F (%.1f\u00B0C)'.encode('utf-8') % (f, temp)
+            if isinstance(dew, float):
+                f = (dew * 1.8) + 32
+                dew = u'%.1f\u00B0F (%.1f\u00B0C)'.encode('utf-8') % (f, dew)
     else: pressure = '?mb'
-    if isinstance(temp, int):
-        temp = u'%s\u2103'.encode('utf-8') % temp
+
+    if isinstance(temp, float):
+        temp = u'%.1f\u00B0C'.encode('utf-8') % temp
+    if isinstance(dew, float):
+        dew = u'%.1f\u00B0C'.encode('utf-8') % dew
 
     if cond:
         conds = cond
@@ -392,23 +505,96 @@ def f_weather(self, origin, match, args):
                 if cond: cond += ', '
                 cond += phenomenon
 
-    # if not cond:
-    #     format = u'%s at %s: %s, %s, %s, %s'
-    #     args = (icao, time, cover, temp, pressure, wind)
-    # else:
-    #     format = u'%s at %s: %s, %s, %s, %s, %s'
-    #     args = (icao, time, cover, temp, pressure, cond, wind)
+    output = str()
+    output += 'Cover: ' + cover
+    output += ', Temp: ' + str(temp)
+    output += ', Dew Point: ' + str(dew)
+    if windchill:
+        output += ', Windchill: ' + str(windchill)
+    output += ', Pressure: ' + pressure
+    if cond:
+        output += ' Condition: ' + cond
+    output += ', Wind: ' + wind
+    output += ' - %s, %s' % (str(icao_code), time)
 
-    if not cond:
-        format = u'%s, %s, %s, %s - %s %s'
-        args = (cover, temp, pressure, wind, str(icao_code), time)
+
+    jenni.say(output)
+f_weather.rule = (['weather', 'wx'], r'(.*)')
+
+
+def fucking_weather(jenni, input):
+    """.fw (ZIP|City, State) -- provide a ZIP code or a city state pair to hear about the fucking weather"""
+    text = input.group(2)
+    if not text:
+        jenni.reply('INVALID FUCKING INPUT. PLEASE ENTER A FUCKING ZIP CODE, OR A FUCKING CITY-STATE PAIR.')
+        return
+    new_text = str()
+
+    new_text = uc.encode(text)
+    search = urllib.quote((new_text).strip())
+
+    url = 'http://thefuckingweather.com/?where=%s' % (search)
+    try:
+        page = web.get(url)
+    except:
+        return jenni.say("I COULDN'T ACCESS THE FUCKING SITE.")
+    re_mark = re.compile('<p class="remark">(.*?)</p>')
+    re_temp = re.compile('<span class="temperature" tempf="\S+">(\S+)</span>')
+    re_condition = re.compile('<p class="large specialCondition">(.*?)</p>')
+    re_flavor = re.compile('<p class="flavor">(.*?)</p>')
+    re_location = re.compile('<span id="locationDisplaySpan" class="small">(.*?)</span>')
+    temps = re_temp.findall(page)
+    remarks = re_mark.findall(page)
+    conditions = re_condition.findall(page)
+    flavor = re_flavor.findall(page)
+    location = re_location.findall(page)
+    response = str()
+    if location and location[0]:
+        response += location[0] + ': '
+    if temps:
+        tempf = float(temps[0])
+        tempc = (tempf - 32.0) * (5 / 9.0)
+        response += u'%.1f°F?! %.1f°C?! ' % (tempf, tempc)
+    if remarks:
+        response += remarks[0]
     else:
-        format = u'%s, %s, %s, %s, %s - %s, %s'
-        args = (cover, temp, pressure, cond, wind, str(icao_code), time)
+        response += "I CAN'T FIND THAT SHIT ON THEIR PAGE."
+    if conditions:
+        response += ' ' + conditions[0]
+    if flavor:
+        response += ' -- ' + flavor[0].replace('  ', ' ')
+    jenni.say(response)
+fucking_weather.commands = ['fucking_weather', 'fw']
+fucking_weather.priority = 'low'
+fucking_weather.rate = 5
 
-    self.msg(origin.sender, format.encode('utf-8') % args)
-f_weather.rule = (['weather'], r'(.*)')
-f_weather.rate = 30
+
+def windchill(jenni, input):
+    '''.windchill <temp> <wind speed> -- shows Windchill in F'''
+    text = input.split()
+    if len(text) == 1:
+        return jenni.say(u'.windchill <temp> <wind speed> -- shows Windchill in \u00B0F')
+    if len(text) >= 3:
+        try:
+            temp = float(text[1])
+            wind = float(text[2])
+        except:
+            return jenni.say('Invalid arguments! Try, .windchill without any parameters.')
+
+    if temp > 50:
+        return jenni.say(u'The windchill formula only works on temperatures below 50 \u00B0F')
+
+    if wind < 0:
+        return jenni.say("You can't have negative wind speed!")
+    elif wind >= 300:
+        jenni.reply('Are you okay?')
+
+    ## cf. http://is.gd/mgLuzU
+    wc = 35.74 + (0.6215 * temp) - (35.75 * (wind ** (0.16))) + (0.4275 * temp * (wind ** (0.16)))
+
+    jenni.say(u'Windchill: %2.f \u00B0F' % (wc))
+windchill.commands = ['windchill', 'wc']
+windchill.priority = 'low'
 
 if __name__ == '__main__':
     print __doc__.strip()

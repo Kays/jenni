@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-rss.py - Jenni RSS Module
-Copyright 2012, Michael Yanovich, yanovich.net
+rss.py - jenni RSS Module
+Copyright 2012-2013, Michael Yanovich (yanovich.net)
 Licensed under the Eiffel Forum License 2.
 
 More info:
- * Jenni: https://github.com/myano/jenni/
+ * jenni: https://github.com/myano/jenni/
  * Phenny: http://inamidst.com/phenny/
 """
 
@@ -19,7 +19,7 @@ from modules import url as url_module
 
 DEBUG = False
 socket.setdefaulttimeout(30)
-INTERVAL = 600  # seconds between checking for new updates
+INTERVAL = 60 * 5  # seconds between checking for new updates
 STOP = False
 
 
@@ -85,8 +85,12 @@ def manage_rss(jenni, input):
         jenni.reply("Successfully removed values from database.")
     elif len(text) >= 4 and text[1] == 'del':
         # .rss del ##channel Site_Name
+        site_name = ' '.join(text[3:])
+        temp = input.group().split('"')
+        if len(temp) != 1:
+            site_name = temp[1]
         c.execute("DELETE FROM rss WHERE channel = ? and site_name = ?",
-                (channel, " ".join(text[3:]),))
+                (channel, site_name))
         conn.commit()
         c.close()
         jenni.reply("Successfully removed the site from the given channel.")
@@ -146,8 +150,9 @@ def read_feeds(jenni):
         try:
             entry = fp.entries[0]
         except:
-            jenni.say("row: " + str(row))
-            jenni.say("Can't find element: " + str(fp))
+            if DEBUG:
+                jenni.say("row: " + str(row))
+                jenni.say("Can't find element: " + str(fp))
             continue
 
         if not feed_fg and not feed_bg:
@@ -175,6 +180,9 @@ def read_feeds(jenni):
             except:
                 short_url = article_url
 
+            if 'j.mp' in short_url or 'bit.ly' in short_url:
+                short_url = short_url.replace('http:', 'https:')
+
             response = site_name_effect + " %s \x02%s\x02" % (entry.title, short_url)
             if entry.updated:
                 response += " - %s" % (entry.updated)
@@ -187,7 +195,10 @@ def read_feeds(jenni):
             conn.commit()
         else:
             if DEBUG:
-                jenni.msg(feed_channel, u"Skipping previously read entry: %s %s" % (site_name_effect, entry.title))
+                if hasattr(jenni.config, 'logchan_pm'):
+                    jenni.msg(jenni.config.logchan_pm, u"Skipping previously read entry for %s: %s %s" % (feed_channel, site_name_effect, entry.title))
+                else:
+                    jenni.say(u"Skipping previously read entry for %s: %s %s" % (feed_channel, site_name_effect, entry.title))
     cursor_recent.close()
     c.close()
 
@@ -226,6 +237,7 @@ def startrss(jenni, input):
             jenni.say("Okay, I'll re-start rss...")
 
     if not STOP:
+        jenni.say('Starting rss...')
         while True:
             if STOP:
                 jenni.reply("STOPPED")

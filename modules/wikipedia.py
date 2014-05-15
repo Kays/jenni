@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 """
-wikipedia.py - Jenni Wikipedia Module
-Copyright 2008-9, Sean B. Palmer, inamidst.com
+wikipedia.py - jenni Wikipedia Module
+Copyright 2009-2013, Michael Yanovich (yanovich.net)
+Copyright 2008-2013, Sean B. Palmer (inamidst.com)
 Licensed under the Eiffel Forum License 2.
 
-http://inamidst.com/phenny/
+More info:
+ * jenni: https://github.com/myano/jenni/
+ * Phenny: http://inamidst.com/phenny/
 """
 
 import re, urllib, gzip, StringIO
 import web
 
-wikiuri = 'http://%s.wikipedia.org/wiki/%s'
+wikiuri = 'https://%s.wikipedia.org/wiki/%s'
 # wikisearch = 'http://%s.wikipedia.org/wiki/Special:Search?' \
 #                            + 'search=%s&fulltext=Search'
 
@@ -56,7 +59,7 @@ def search(term):
     try: uri = search.google_search('site:en.wikipedia.org %s' % term)
     except IndexError: return term
     if uri:
-        return uri[len('http://en.wikipedia.org/wiki/'):]
+        return uri[len('https://en.wikipedia.org/wiki/'):]
     else: return term
 
 def wikipedia(term, language='en', last=False):
@@ -154,6 +157,7 @@ def wik(jenni, input):
     if not origterm:
         return jenni.say('Perhaps you meant ".wik Zen"?')
     origterm = origterm.encode('utf-8')
+    origterm = origterm.strip()
 
     term = urllib.unquote(origterm)
     language = 'en'
@@ -175,7 +179,7 @@ def wik(jenni, input):
         jenni.say(result)
     else: jenni.say('Can\'t find anything in Wikipedia for "%s".' % origterm)
 
-wik.commands = ['wik', 'wiki']
+wik.commands = ['w', 'wik', 'wiki']
 wik.priority = 'high'
 wik.rate = 30
 

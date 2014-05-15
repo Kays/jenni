@@ -1,121 +1,225 @@
 #!/usr/bin/env python
 # coding=utf-8
 """
-calc.py - Jenni Calculator Module
-Copyright 2008, Sean B. Palmer, inamidst.com
+calc.py - jenni Calculator Module
+Copyright 2009-2013, Michael Yanovich (yanovich.net)
+Copyright 2008-2013, Sean B. Palmer (inamidst.com)
 Licensed under the Eiffel Forum License 2.
 
-http://inamidst.com/phenny/
+More info:
+ * jenni: https://github.com/myano/jenni/
+ * Phenny: http://inamidst.com/phenny/
 """
 
+import HTMLParser
+import json
 import re
+import string
+import urllib
 import web
 
-r_result = re.compile(r'(?i)<A NAME=results>(.*?)</A>')
-r_tag = re.compile(r'<\S+.*?>')
+from modules import search
+from modules import unicode as uc
+from socket import timeout
 
-subs = [
-    (' in ', ' -> '),
-    (' over ', ' / '),
-    (u'£', 'GBP '),
-    (u'€', 'EUR '),
-    ('\$', 'USD '),
-    (r'\bKB\b', 'kilobytes'),
-    (r'\bMB\b', 'megabytes'),
-    (r'\bGB\b', 'kilobytes'),
-    ('kbps', '(kilobits / second)'),
-    ('mbps', '(megabits / second)')
-]
 
-def calc(jenni, input):
-    """Use the Frink online calculator."""
-    q = input.group(2)
-    if not q:
-        return jenni.say('0?')
+c_pattern = r'(?ims)<(?:h2 class="r"|div id="aoba")[^>]*>(.*?)</(?:h2|div)>'
+c_answer = re.compile(c_pattern)
+r_tag = re.compile(r'<(?!!)[^>]+>')
 
-    query = q[:]
-    for a, b in subs:
-        query = re.sub(a, b, query)
-    query = query.rstrip(' \t')
+try:
+    import proxy
+except:
+    pass
 
-    precision = 5
-    if query[-3:] in ('GBP', 'USD', 'EUR', 'NOK'):
-        precision = 2
-    query = web.urllib.quote(query.encode('utf-8'))
-
-    uri = 'http://futureboy.us/fsp/frink.fsp?fromVal='
-    bytes = web.get(uri + query)
-    m = r_result.search(bytes)
-    if m:
-        result = m.group(1)
-        result = r_tag.sub('', result) # strip span.warning tags
-        result = result.replace('&gt;', '>')
-        result = result.replace('(undefined symbol)', '(?) ')
-
-        if '.' in result:
-            try: result = str(round(float(result), precision))
-            except ValueError: pass
-
-        if not result.strip():
-            result = '?'
-        elif ' in ' in q:
-            result += ' ' + q.split(' in ', 1)[1]
-
-        jenni.say(q + ' = ' + result[:350])
-    else: jenni.reply("Sorry, can't calculate that.")
-    jenni.say('Note that .calc is deprecated, consider using .c')
-calc.commands = ['calc']
-calc.example = '.calc 5 + 3'
-calc.rate = 30
 
 def c(jenni, input):
-    """Google calculator."""
+    '''.c -- Google calculator.'''
+
+    ## let's not bother if someone doesn't give us input
     if not input.group(2):
-        return jenni.reply("Nothing to calculate.")
+        return jenni.reply('Nothing to calculate.')
+
+    ## handle some unicode conversions
     q = input.group(2).encode('utf-8')
-    q = q.replace('\xcf\x95', 'phi') # utf-8 U+03D5
-    q = q.replace('\xcf\x80', 'pi') # utf-8 U+03C0
-    uri = 'http://www.google.com/ig/calculator?q='
-    bytes = web.get(uri + web.urllib.quote(q))
-    parts = bytes.split('",')
-    answer = [p for p in parts if p.startswith('rhs: "')][0][6:]
+    q = q.replace('\xcf\x95', 'phi')  # utf-8 U+03D5
+    q = q.replace('\xcf\x80', 'pi')  # utf-8 U+03C0
+
+    ## Attempt #1 (Google)
+    uri = 'https://www.google.com/search?gbv=1&q='
+    uri += web.urllib.quote(q)
+
+    ## To the webs!
+    try:
+        page = proxy.get(uri)
+    except:
+        ## if we can't access Google for calculating
+        ## let us move on to Attempt #2
+        page = web.get(uri)
+
+    answer = False
+    if page:
+        ## if we get a response from Google
+        ## let us parse out an equation from Google Search results
+        answer = c_answer.findall(page)
+
     if answer:
+        ## if the regex finding found a match we want the first result
+        answer = answer[0]
+        #answer = answer.replace(u'\xc2\xa0', ',')
+        answer = answer.encode('unicode-escape')
         answer = answer.decode('unicode-escape')
         answer = ''.join(chr(ord(c)) for c in answer)
-        answer = answer.decode('utf-8')
-        answer = answer.replace(u'\xc2\xa0', ',')
+        answer = uc.decode(answer)
         answer = answer.replace('<sup>', '^(')
         answer = answer.replace('</sup>', ')')
         answer = web.decode(answer)
+        answer = answer.strip()
+        answer += ' [GC]'
         jenni.say(answer)
-    else: jenni.say('Sorry, no result.')
-c.commands = ['c']
+    else:
+        #### Attempt #2 (DuckDuckGo's API)
+        ddg_uri = 'https://api.duckduckgo.com/?format=json&q='
+        ddg_uri += urllib.quote(q)
+
+        ## Try to grab page (results)
+        ## If page can't be accessed, we shall fail!
+        try:
+            page = proxy.get(ddg_uri)
+        except:
+            page = web.get(ddg_uri)
+
+        ## Try to take page source and json-ify it!
+        try:
+            json_response = json.loads(page)
+        except:
+            ## if it can't be json-ified, then we shall fail!
+            json_response = None
+
+        ## Check for 'AnswerType' (stolen from search.py)
+        ## Also 'fail' to None so we can move on to Attempt #3
+        if (not json_response) or (hasattr(json_response, 'AnswerType') and json_response['AnswerType'] != 'calc'):
+            answer = None
+        else:
+            ## If the json contains an Answer that is the result of 'calc'
+            ## then continue
+            answer = re.sub(r'\<.*?\>', '', json_response['Answer']).strip()
+
+        if answer:
+            ## If we have found answer with Attempt #2
+            ## go ahead and display it
+            answer += ' [DDG API]'
+            jenni.say(answer)
+
+        else:
+            #### Attempt #3 (Wolfram Alpha)
+            status, answer = get_wa(q)
+
+            if status:
+                jenni.say(answer + ' [WA]')
+
+            else:
+                #### Attempt #4 (DuckDuckGo's HTML)
+                ## This relies on BeautifulSoup; if it can't be found, don't even bother
+                try:
+                    from BeautifulSoup import BeautifulSoup
+                except:
+                    return jenni.say('No results. (Please install BeautifulSoup for additional checking.)')
+
+                new_url = 'https://duckduckgo.com/html/?q=%s&kl=us-en&kp=-1' % (web.urllib.quote(q))
+                try:
+                    ddg_html_page = proxy.get(new_url)
+                except:
+                    ddg_html_page = web.get(new_url)
+                soup = BeautifulSoup(ddg_html_page)
+
+                ## use BeautifulSoup to parse HTML for an answer
+                zero_click = str()
+                if soup('div', {'class': 'zero-click-result'}):
+                    zero_click = str(soup('div', {'class': 'zero-click-result'})[0])
+
+                ## remove some excess text
+                output = r_tag.sub('', zero_click).strip()
+                output = output.replace('\n', '').replace('\t', '')
+
+                ## test to see if the search module has 'remove_spaces'
+                ## otherwise, let us fail
+                try:
+                    output = search.remove_spaces(output)
+                except:
+                    output = str()
+
+                if output:
+                    ## If Attempt #4 worked, display the answer
+                    jenni.say(output + ' [DDG HTML]')
+                else:
+                    ## If we made it this far, we have tried all available resources
+                    jenni.say('Absolutely no results!')
+c.commands = ['c', 'cal', 'calc']
 c.example = '.c 5 + 3'
-c.rate = 30
+
 
 def py(jenni, input):
+    """.py <code> -- evaluates python code"""
     code = input.group(2)
-    if not code: return
+    if not code:
+        return jenni.reply('No code provided.')
     query = code.encode('utf-8')
-    uri = 'http://tumbolia.appspot.com/py/'
-    answer = web.get(uri + web.urllib.quote(query))
+    uri = 'https://tumbolia.appspot.com/py/'
+    try:
+        answer = web.get(uri + web.urllib.quote(query))
+        if answer is not None and answer != "\n":
+            jenni.say(answer)
+        else:
+            jenni.reply('Sorry, no result.')
+    except Exception, e:
+        jenni.reply('The server did not return an answer.')
+        print '[.py]', e
+py.commands = ['py', 'python']
+py.example = '.py print "Hello world, %s!" % ("James")'
+
+
+def get_wa(search):
+    query = search.encode('utf-8')
+    uri = 'https://tumbolia.appspot.com/wa/'
+    uri += urllib.quote(query.replace('+', '%2B'))
+    answer = web.get(uri)
     if answer:
-        jenni.say(answer)
-    else: jenni.reply('Sorry, no result.')
-py.commands = ['py']
-py.rate = 30
+        print "answer:", answer
+        answer = answer.decode("string_escape")
+        answer = HTMLParser.HTMLParser().unescape(answer)
+        match = re.search('\\\:([0-9A-Fa-f]{4})', answer)
+        if match is not None:
+            char_code = match.group(1)
+            char = unichr(int(char_code, 16))
+            answer = answer.replace('\:' + char_code, char)
+        waOutputArray = string.split(answer, ";")
+        newOutput = list()
+        for each in waOutputArray:
+            temp = each.replace('\/', '/')
+            newOutput.append(temp)
+        waOutputArray = newOutput
+        print 'length:', len(waOutputArray)
+        if (len(waOutputArray) < 2):
+            return True, answer
+        else:
+            return True, waOutputArray[0] + ' | ' + " | ".join(waOutputArray[1:])
+        waOutputArray = list()
+    else:
+        return False, str()
+
 
 def wa(jenni, input):
+    """.wa <input> -- queries WolframAlpha with the given input."""
     if not input.group(2):
         return jenni.reply("No search term.")
-    query = input.group(2).encode('utf-8')
-    uri = 'http://tumbolia.appspot.com/wa/'
-    answer = web.get(uri + web.urllib.quote(query.replace('+', '%2B')))
-    if answer:
+    status, answer = get_wa(input.group(2))
+    if status:
         jenni.say(answer)
-    else: jenni.reply('Sorry, no result.')
-wa.commands = ['wa']
-wa.rate = 30
+    else:
+        jenni.say('Sorry, no result from WolframAlpha.')
+wa.commands = ['wa', 'wolfram']
+wa.example = '.wa land area of the European Union'
 
 if __name__ == '__main__':
     print __doc__.strip()

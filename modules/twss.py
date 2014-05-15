@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """
-twss.py - Jenni's That's What She Said Module
+twss.py - jenni's That's What She Said Module
 Copyright 2011 - Joel Friedly and Matt Meinwald
 Licensed under the Eiffel Forum License 2.
 
 More info:
- * Jenni: https://github.com/myano/jenni/
+ * jenni: https://github.com/myano/jenni/
  * Phenny: http://inamidst.com/phenny/
 
 This module detects common phrases that many times can be responded with
@@ -72,16 +72,19 @@ def say_it(jenni, input):
     last = re.sub("[^\w\s]", "", formatted)
 say_it.rule = r"(.*)"
 say_it.priority = "low"
+say_it.rate = 20
 
 def add_twss(jenni, input):
-    print last
-    with open("modules/twss_user_added.txt", "a") as f:
-        f.write(re.sub(r"[^\w\s]", "", last.lower()) + "\n")
-        f.close()
-    jenni.say("That's what she said.")
+    txt = input.group(2)
+    if txt:
+        with open("modules/twss_user_added.txt", "a") as f:
+            f.write(re.sub(r"[^\w\s]", "", last.lower()) + "\n")
+            f.close()
+        jenni.say("Added, new \"That's what she said.\"")
 add_twss.commands = ["twss"]
 add_twss.priority = "low"
 add_twss.threading = False
+add_twss.rate = 20
 
 if __name__ == '__main__':
     print __doc__.strip()

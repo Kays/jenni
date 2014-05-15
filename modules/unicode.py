@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """
-unicode.py - Jenni Unicode Module
-Copyright 2010, Michael Yanovich, yanovich.net
+unicode.py - jenni Unicode Module
+Copyright 2010-2013, Michael Yanovich (yanovich.net)
 Licensed under the Eiffel Forum License 2.
 
 More info:
- * Jenni: https://github.com/myano/jenni/
+ * jenni: https://github.com/myano/jenni/
  * Phenny: http://inamidst.com/phenny/
 """
 
@@ -13,7 +13,12 @@ import re
 import unicodedata
 import urlparse
 
-def meh(jenni, input):
+control_chars = ''.join(map(unichr, range(0,32) + range(127,160)))
+control_char_re = re.compile(u'[%s]' % re.escape(control_chars))
+
+
+def supercombiner(jenni, input):
+    """.sc -- displays the infamous supercombiner"""
     s = 'u'
     for i in xrange(1, 3000):
         if unicodedata.category(unichr(i)) == "Mn":
@@ -21,29 +26,35 @@ def meh(jenni, input):
         if len(s) > 100:
             break
     jenni.say(s)
-meh.commands = ['sc']
-meh.rate = 30
+supercombiner.commands = ['sc']
+supercombiner.rate = 30
 
 
-def decode(bytes):
+def decode(bit):
     try:
-        text = bytes.decode('utf-8')
+        if isinstance(bit, str) or isinstance(bit, unicode):
+            text = bit.decode('utf-8')
+        else:
+            text = str()
     except UnicodeDecodeError:
         try:
-            text = bytes.decode('iso-8859-1')
+            text = bit.decode('iso-8859-1')
         except UnicodeDecodeError:
-            text = bytes.decode('cp1252')
+            text = bit.decode('cp1252')
     return text
 
 
-def encode(bytes):
+def encode(bit):
     try:
-        text = bytes.encode('utf-8')
+        if isinstance(bit, str) or isinstance(bit, unicode):
+            text = bit.encode('utf-8')
+        else:
+            text = str()
     except UnicodeEncodeError:
         try:
-            text = bytes.encode('iso-8859-1')
+            text = bit.encode('iso-8859-1')
         except UnicodeEncodeError:
-            text = bytes.encode('cp1252')
+            text = bit.encode('cp1252')
     return text
 
 
@@ -54,9 +65,15 @@ def urlEncodeNonAscii(b):
 def iriToUri(iri):
     parts = urlparse.urlparse(iri)
     return urlparse.urlunparse(
-        part.encode('idna') if parti == 1 else urlEncodeNonAscii(part.encode('utf-8'))
+        part.encode('idna') if parti == 1 else urlEncodeNonAscii(
+            part.encode('utf-8'))
         for parti, part in enumerate(parts)
     )
+
+
+def remove_control_chars(s):
+    return control_char_re.sub('', s)
+
 
 if __name__ == '__main__':
     print __doc__.strip()

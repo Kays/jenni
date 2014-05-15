@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """
-bot.py - Jenni IRC Bot
-Copyright 2008, Sean B. Palmer, inamidst.com
-Modified by: Michael Yanovich
+bot.py - jenni IRC Bot
+Copyright 2009-2013, Michael Yanovich (yanovich.net)
+Copyright 2008-2013, Sean B. Palmer (inamidst.com)
 Licensed under the Eiffel Forum License 2.
 
 More info:
- * Jenni: https://github.com/myano/jenni/
+ * jenni: https://github.com/myano/jenni/
  * Phenny: http://inamidst.com/phenny/
 """
 
@@ -30,6 +30,7 @@ class Jenni(irc.Bot):
         if hasattr(config, "logging"): logging = config.logging
         else: logging = False
         args = (config.nick, config.name, config.channels, config.password, lc_pm, logging)
+        ## next, try putting a try/except around the following line
         irc.Bot.__init__(self, *args)
         self.config = config
         self.doc = {}
@@ -44,7 +45,7 @@ class Jenni(irc.Bot):
 
         filenames = []
         if not hasattr(self.config, 'enable'):
-            for fn in os.listdir(os.path.join(home, 'modules')):
+            for fn in os.listdir(os.path.join(os.getcwd(), 'modules')):
                 if fn.endswith('.py') and not fn.startswith('_'):
                     filenames.append(os.path.join(home, 'modules', fn))
         else:
@@ -122,13 +123,17 @@ class Jenni(irc.Bot):
 
             if not hasattr(func, 'event'):
                 func.event = 'PRIVMSG'
-            else: func.event = func.event.upper()
+            else:
+                if func.event:
+                    func.event = func.event.upper()
+                else:
+                    continue
 
             if not hasattr(func, 'rate'):
                 if hasattr(func, 'commands'):
-                    func.rate = 0
+                    func.rate = 3
                 else:
-                    func.rate = 0
+                    func.rate = -1
 
             if hasattr(func, 'rule'):
                 if isinstance(func.rule, str):
@@ -149,7 +154,7 @@ class Jenni(irc.Bot):
                         prefix = self.config.prefix
                         commands, pattern = func.rule
                         for command in commands:
-                            command = r'(%s)\b(?: +(?:%s))?' % (command, pattern)
+                            command = r'(?i)(%s)\b(?: +(?:%s))?' % (command, pattern)
                             regexp = re.compile(prefix + command)
                             bind(self, func.priority, regexp, func)
 
@@ -158,13 +163,13 @@ class Jenni(irc.Bot):
                         prefix, commands, pattern = func.rule
                         prefix = sub(prefix)
                         for command in commands:
-                            command = r'(%s) +' % command
+                            command = r'(?i)(%s) +' % command
                             regexp = re.compile(prefix + command + pattern)
                             bind(self, func.priority, regexp, func)
 
             if hasattr(func, 'commands'):
                 for command in func.commands:
-                    template = r'^%s(%s)(?: +(.*))?$'
+                    template = r'(?i)^%s(%s)(?: +(.*))?$'
                     pattern = template % (self.config.prefix, command)
                     regexp = re.compile(pattern)
                     bind(self, func.priority, regexp, func)
@@ -234,7 +239,6 @@ class Jenni(irc.Bot):
                     fname = func.func_code.co_filename.split('/')[-1].split('.')[0]
                     if fname in self.excludes[input.sender]:
                         # block function call if channel is blacklisted
-                        print 'Blocked:', input.sender, func.name, func.func_code.co_filename
                         return
         except Exception, e:
             print "Error attempting to block:", str(func.name)

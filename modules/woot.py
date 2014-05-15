@@ -1,17 +1,17 @@
 #!/usr/bin/env python
 """
-why.py - Jenni Why Module
-Copyright 2009-10, Michael Yanovich, yanovich.net
+why.py - jenni Why Module
+Copyright 2009-2013, Michael Yanovich (yanovich.net)
 Licensed under the Eiffel Forum License 2.
 
 More info:
- * Jenni: https://github.com/myano/jenni/
+ * jenni: https://github.com/myano/jenni/
  * Phenny: http://inamidst.com/phenny/
 """
 
 import feedparser
 
-api = "http://api.woot.com/1/sales/current.rss/www.woot.com"
+api = "https://api.woot.com/1/sales/current.rss/www.woot.com"
 
 
 def woot(jenni, input):
@@ -37,8 +37,10 @@ def woot(jenni, input):
     base2 = "\x02 {3}, \x02Quantity:\x02 {4}, \x02Woot-Off:\x02 {5} -- {6}"
     base = base1 + base2
 
+    link = link.split('?')[0]
+
     output = base.format(item, price, soldout, condition, quantity,
-        woot_off, link)
+            woot_off, link.replace("http:", "https:"))
     jenni.reply(output)
 woot.commands = ['woot']
 woot.priority = 'low'

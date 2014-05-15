@@ -2,21 +2,24 @@
 # -*- coding: utf-8 -*-
 # vim: set fileencoding=UTF-8 :
 """
-ham.py - Ham Radio Module
-Copyright 2011, Michael Yanovich, yanovich.net
+ham.py - jenni Ham Radio Module
+Copyright 2011-2013, Michael Yanovich (yanovich.net)
 Licensed under the Eiffel Forum License 2.
 
 More info:
- * Jenni: https://github.com/myano/jenni/
+ * jenni: https://github.com/myano/jenni/
  * Phenny: http://inamidst.com/phenny/
 
 This contains a collection of lookups and calls for ham radio enthusiasts.
 """
 
+from modules import unicode as uc
 import re
 import web
 
-re_look = re.compile('<FONT FACE="Arial, Helvetica, sans-serif" SIZE=4>(.*)<BR>')
+re_look = re.compile('(?i)<FONT FACE="Arial, Helvetica, sans-serif" SIZE=4>(.*?)<br>(.*)</tr>')
+re_more = re.compile('(?i)<B>(.*?)</B></FONT></td>\n(.*</td>)')
+re_tag = re.compile(r'<[^>]+>')
 
 morse = {
         "a": ".-",
@@ -112,31 +115,56 @@ def reverse_lookup(v, d=morse):
             result = k
     return result
 
-def lookup(jenni, input):
+def cs(jenni, input):
+    '''.cs <callsign> -- queries qth.com for call sign information'''
     cs = input.group(2).upper()
-    link = "http://www.qth.com/callsign.php?cs=" + unicode(cs)
+    try:
+        link = "http://www.qth.com/callsign.php?cs=" + uc.decode(web.quote(cs))
+    except Exception, e:
+        print e
+        return jenni.say('Failed to obtain data from qth.com')
     page = web.get(link)
-    name = re_look.findall(page)
-    if name:
-        jenni.say("Name: " + name[0] + ", more information available at: " + link)
+    info = re_look.findall(page)
+    more_info = re_more.findall(page)
+    if info and more_info:
+        info = info[0]
+        name = info[0]
+        name = re_tag.sub(' ', info[0]).strip()
+        address = re_tag.sub(' ', info[1]).strip()
+        extra = dict()
+        for each in more_info:
+            extra[each[0].strip()] = re_tag.sub('', each[1].strip()).strip()
+        response = '(%s) ' % (web.quote(cs))
+        response += 'Name: %s, Address: %s. '  # More information is available at: %s'
+        response = response % (uc.decode(name), uc.decode(address))
+        for each in more_info:
+            temp = re_tag.sub('', each[1].strip())
+            if not temp:
+                temp = 'N/A'
+            response += '%s: %s. ' % (each[0].strip(), temp)
+        #response = response % (name, address, link)
+        response += 'More information is available at: %s' % (link)
     else:
-        jenni.say('No matches found')
-lookup.commands = ['cs']
-lookup.rate = 30
+        response = 'No matches found.'
+    jenni.say(response)
+cs.commands = ['cs']
+cs.example = '.cs W8LT'
 
 def cw(jenni, input):
-    re_cw = re.compile("[\.\- ]+")
-    re_noncw = re.compile("[^\.\- ]+")
+    re_cw = re.compile("[/\.\- ]+")
+    re_noncw = re.compile("[^/\.\- ]+")
     text = input.group(2).lower().rstrip().lstrip()
     temp = text.split(" ")
     output = str()
     if re_cw.findall(text) and not re_noncw.findall(text):
         ## MORSE
+        output = output.replace(' / ', '  ')
         for code in temp:
             if " " in code:
                 output += " "
                 code = code.replace(" ", "")
             output += reverse_lookup(code)
+        output = output.replace('  ', ' ')
         output = output.upper()
     else:
         ## TEXT
@@ -146,11 +174,9 @@ def cw(jenni, input):
             except KeyError:
                 output = "Non morse code character used."
                 break
-            if char != " ":
-                output += " "
+            output += " "
     jenni.reply(output)
 cw.commands = ['cw']
-cw.rate = 15
 cw.thread = True
 
 if __name__ == '__main__':

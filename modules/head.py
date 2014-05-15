@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 """
-head.py - Jenni HTTP Metadata Utilities
-Copyright 2008, Sean B. Palmer, inamidst.com
+head.py - jenni HTTP Metadata Utilities
+Copyright 2009-2013, Michael Yanovich (yanovich.net)
+Copyright 2008-2013, Sean B. Palmer (inamidst.com)
 Licensed under the Eiffel Forum License 2.
 
 More info:
- * Jenni: https://github.com/myano/jenni/
+ * jenni: https://github.com/myano/jenni/
  * Phenny: http://inamidst.com/phenny/
 """
 
@@ -23,12 +24,14 @@ def head(jenni, input):
     else: uri, header = uri, None
 
     if not uri and hasattr(jenni, 'last_seen_uri'):
-        try: uri = jenni.last_seen_uri[input.sender]
+        try: uri = jenni.bot.last_seen_uri[input.sender]
         except KeyError: return jenni.say('?')
 
     if not uri.startswith('htt'):
         uri = 'http://' + uri
-    # uri = uri.replace('#!', '?_escaped_fragment_=')
+
+    if '/#!' in uri:
+        uri = uri.replace('/#!', '/?_escaped_fragment_=')
 
     try: info = web.head(uri)
     except IOError: return jenni.say("Can't connect to %s" % uri)

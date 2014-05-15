@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 """
-scores.py - Scores Module
-Copyright 2010-2011, Michael Yanovich (yanovich.net), Matt Meinwald,
-and Samuel Clements
+scores.py - jenni Scores Module
+Copyright 2010-2013, Michael Yanovich (yanovich.net) and Matt Meinwald,
+    and Samuel Clements
 
 More info:
- * Jenni: https://github.com/myano/jenni/
+ * jenni: https://github.com/myano/jenni/
  * Phenny: http://inamidst.com/phenny/
 """
 
+import codecs
+from modules import unicode as uc
 import pickle
 import os
+import time
 
 
 class Scores:
@@ -37,7 +40,7 @@ class Scores:
     def editpoints(self, jenni, input, nick, points):
         if not nick:
             return
-        nick = (nick).lower()
+        nick = uc.encode(nick.lower())
         if not nick:
             jenni.reply(self.STRINGS["cantadd"])
         elif (input.nick).lower() == nick:
@@ -61,30 +64,28 @@ class Scores:
 
     def save(self):
         """ Save to file in comma seperated values """
-        scores_file = open(self.scores_filename, "w")
+        os.rename(self.scores_filename, '%s-%s' % (self.scores_filename, str(time.time())))
+        scores_file = codecs.open(self.scores_filename, 'w', encoding='utf-8')
         for each_chan in self.scores_dict:
             for each_nick in self.scores_dict[each_chan]:
-                line = "{0},{1},{2},{3}\n".format(each_chan, each_nick,
-                                                  self.scores_dict[
-                                                  each_chan][each_nick][0],
-                                                  self.scores_dict[
-                                                  each_chan][each_nick][1])
-                scores_file.write(line)
+                line = '{0},{1},{2},{3}\n'.format(each_chan, each_nick, self.scores_dict[each_chan][each_nick][0], self.scores_dict[each_chan][each_nick][1])
+                scores_file.write(uc.decode(line))
         scores_file.close()
 
     def load(self):
         try:
-            sfile = open(self.scores_filename, "r")
+            sfile = open(self.scores_filename, 'r')
         except:
-            sfile = open(self.scores_filename, "w")
+            sfile = open(self.scores_filename, 'w')
             sfile.close()
             return
         for line in sfile:
-            values = line.split(",")
+            values = line.split(',')
             if len(values) == 4:
-                if values[0] not in self.scores_dict:
-                    self.scores_dict[values[0]] = dict()
-                self.scores_dict[values[0]][values[1]] = [int(values[2]),
+                channel = (values[0]).lower()
+                if channel not in self.scores_dict:
+                    self.scores_dict[channel] = dict()
+                self.scores_dict[channel][values[1]] = [int(values[2]),
                                                           int(values[3])]
         if not self.scores_dict:
             self.scores_dict = dict()
@@ -92,28 +93,35 @@ class Scores:
 
     def view_scores(self, jenni, input):
 
-        def top10(channel):
+        def ten(channel, ranking):
             channel = channel.lower()
             if channel not in self.scores_dict:
                 return self.STRINGS["nochan"].format(channel)
             q = 0
             top_scores = list()
-            str_say = "\x02Top 10 (for %s):\x02" % (channel)
+            if ranking == 'b':
+                tob = 'Bottom'
+            elif ranking == 't':
+                tob= 'Top'
+            str_say = "\x02%s 10 (for %s):\x02" % (tob, channel)
+            sort = True
+            if ranking == 'b':
+                sort = False
             scores = sorted(self.scores_dict[channel].iteritems(),
-                            key=lambda (k, v): (v[0] - v[1]), reverse=True)
+                            key=lambda (k, v): (v[0] - v[1]), reverse=sort)
             for key, value in scores:
                 top_scores.append(self.str_score(key, channel))
                 if len(scores) == q + 1:
-                    str_say += " %s" % (top_scores[q])
+                    str_say += ' %s' % (uc.decode(top_scores[q]))
                 else:
-                    str_say += " %s |" % (top_scores[q])
+                    str_say += ' %s |' % (uc.decode(top_scores[q]))
                 q += 1
                 if q > 9:
                     break
             return str_say
 
         def given_user(nick, channel):
-            nick = nick.lower()
+            nick = uc.encode(nick.lower())
             channel = channel.lower()
             if channel in self.scores_dict:
                 if nick in self.scores_dict[channel]:
@@ -128,9 +136,9 @@ class Scores:
         current_channel = input.sender
         current_channel = current_channel.lower()
 
-        if len(line) == 0:
+        if len(line) == 0 or (len(line) == 1 and line[0] == 'top'):
             ## .scores
-            t10 = top10(current_channel)
+            t10 = ten(current_channel, 't')
             jenni.say(t10)
 
         elif len(line) == 1 and not line[0].startswith("#"):
@@ -139,12 +147,17 @@ class Scores:
 
         elif len(line) == 1 and line[0].startswith("#"):
             ## .scores <channel>
-            t10_chan = top10(line[0])
+            t10_chan = ten(line[0], 't')
             jenni.say(t10_chan)
 
-        elif len(line) == 2 and line[1] != "all":
+        elif len(line) == 2 and line[0].startswith("#") and line[1] != "all":
             ## .scores <channel> <nick>
             jenni.say(given_user(line[1], line[0]))
+
+        elif len(line) == 2 and not line[0].startswith("#") and line[1].startswith("#") and line[0] == "botom":
+            ## .scores bottom <channel>
+            b10 = ten(line[1], 'b')
+            jenni.say(b10)
 
         elif len(line) == 2:
             ## .scores <nick> all
@@ -171,8 +184,8 @@ class Scores:
         line = line[10:].split()
         if len(line) != 4:
             return
-        channel = line[0]
-        nick = line[1].lower()
+        channel = uc.encode(line[0])
+        nick = uc.encode(line[1]).lower()
         try:
             add = int(line[2])
             sub = int(line[3])
@@ -180,10 +193,14 @@ class Scores:
             jenni.say(self.STRINGS["invalid"])
             return
 
+        if add < 0 or sub < 0:
+            jenni.reply("You are doing it wrong.")
+            return
+
         if channel not in self.scores_dict:
             self.scores_dict[channel] = dict()
 
-        self.scores_dict[channel][nick] = [add, sub]
+        self.scores_dict[channel][nick] = [int(add), int(sub)]
         self.save()
         jenni.say(self.str_score(nick, channel))
 
@@ -194,8 +211,8 @@ class Scores:
             jenni.reply("No input provided.")
             return
         line = line[8:].split()
-        channel = input.sender
-        nick = line[0].lower()
+        channel = uc.encode(input.sender)
+        nick = uc.encode(line[0]).lower()
 
         def check(nick, channel):
             nick = nick.lower()
@@ -220,7 +237,7 @@ class Scores:
 
         jenni.say(result)
 
-# Jenni commands
+# jenni commands
 scores = Scores()
 
 
@@ -232,26 +249,26 @@ def addpoint_command(jenni, input):
     scores.editpoints(jenni, input, nick, True)
 addpoint_command.commands = ['addpoint']
 addpoint_command.priority = 'high'
-addpoint_command.rate = 300
+addpoint_command.rate = 180
 
 
 def rmpoint_command(jenni, input):
-    """.rmpoint <nick> - Adds 1 point to the score system for <nick>."""
+    """.rmpoint <nick> - Removes 1 point to the score system for <nick>."""
     nick = input.group(2)
     if nick:
         nick = nick.strip().split()[0]
     scores.editpoints(jenni, input, nick, False)
 rmpoint_command.commands = ['rmpoint']
 rmpoint_command.priority = 'high'
-rmpoint_command.rate = 300
+rmpoint_command.rate = 180
 
 
 def view_scores(jenni, input):
-    """.scores - Lists all users and their point values in the system."""
+    """.scores <channel> <user> - Lists all users and their point values in the system. channel and user parameters are optional"""
     scores.view_scores(jenni, input)
-view_scores.commands = ['scores']
+view_scores.commands = ['points', 'point', 'scores', 'score']
 view_scores.priority = 'medium'
-view_scores.rate = 300
+view_scores.rate = 180
 
 
 def setpoint(jenni, input):
@@ -260,7 +277,7 @@ def setpoint(jenni, input):
     if line:
         line = line.lstrip().rstrip()
     scores.setpoint(jenni, input, line)
-setpoint.commands = ['setpoint']
+setpoint.commands = ['setpoint', 'setscore']
 setpoint.priority = 'medium'
 
 

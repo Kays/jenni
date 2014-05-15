@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """
 irc.py - A Utility IRC Bot
-Copyright 2008, Sean B. Palmer, inamidst.com
-Modified by: Michael Yanovich
+Copyright 2009-2013, Michael Yanovich (yanovich.net)
+Copyright 2008-2013, Sean B. Palmer (inamidst.com)
 Licensed under the Eiffel Forum License 2.
 
 More info:
- * Jenni: https://github.com/myano/jenni/
+ * jenni: https://github.com/myano/jenni/
  * Phenny: http://inamidst.com/phenny/
 """
 
@@ -83,23 +83,39 @@ class Bot(asynchat.async_chat):
     # def push(self, *args, **kargs):
     #     asynchat.async_chat.push(self, *args, **kargs)
 
+    def handle_error(self):
+        '''Handle any uncaptured error in the core. Overrides asyncore's handle_error
+        This prevents the bot from disconnecting when it use to say something twice
+        and then disconnect.'''
+        trace = traceback.format_exc()
+        try:
+            print trace
+        except Exception, e:
+            print 'Uncaptured error!!!', e
+
+
     def __write(self, args, text=None, raw=False):
         # print '%r %r %r' % (self, args, text)
         try:
             if raw:
                 temp = ' '.join(args)[:510] + " :" + text + '\r\n'
-                self.push(temp)
             elif not raw:
                 if text:
                     # 510 because CR and LF count too, as nyuszika7h points out
                     temp = (' '.join(args) + ' :' + text)[:510] + '\r\n'
                 else:
                     temp = ' '.join(args)[:510] + '\r\n'
-                self.push(temp)
+            self.push(temp)
             if self.logging:
                 log_raw(temp)
-        except IndexError:
-            print "INDEXERROR", text
+        except Exception, e:
+            print time.time()
+            print '[__WRITE FAILED]', e
+            print 'raw:', str(raw)
+            print 'temp:', str(temp)
+            print 'args:', str(args)
+            print 'text:', str(text)
+            print '-' * 3
             #pass
 
     def write(self, args, text=None, raw=False):
@@ -111,7 +127,12 @@ class Bot(asynchat.async_chat):
                 self.__write(args, text, raw)
             else:
                 self.__write(args, text)
-        except Exception, e: pass
+        except Exception, e:
+            print '[WRITE FAILED]', e
+            print 'raw:', str(raw)
+            print 'temp:', str(temp)
+            print 'args:', str(args)
+            print 'text:', str(text)
 
     def safe(self, input, u=False):
         if input:
@@ -133,6 +154,8 @@ class Bot(asynchat.async_chat):
         try: asyncore.loop()
         except KeyboardInterrupt:
             sys.exit()
+        except Exception, e:
+            print '[asyncore]', e
 
     def handle_connect(self):
         if self.verbose:
@@ -166,12 +189,16 @@ class Bot(asynchat.async_chat):
         # print line
         if line.startswith(':'):
             source, line = line[1:].split(' ', 1)
-        else: source = None
+        else:
+            source = None
 
         if ' :' in line:
             argstr, text = line.split(' :', 1)
-        else: argstr, text = line, ''
-        args = argstr.split()
+            args = argstr.split()
+            args.append(text)
+        else:
+            args = line.split()
+            text = args[-1]
 
         origin = Origin(self, source, args)
         self.dispatch(origin, tuple([text] + args))
