@@ -73,6 +73,7 @@ class Bot(asynchat.async_chat):
 
         self.use_ssl = False
         self.use_sasl = False
+        self.use_ipv6 = False
         self.is_connected = False
         self.is_authenticated = False
 
@@ -161,7 +162,11 @@ class Bot(asynchat.async_chat):
             message = 'Connecting to %s:%s...' % (host, port)
             print >> sys.stderr, message,
 
-        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+        inet_protocol = socket.AF_INET
+        if self.use_ipv6 and socket.has_ipv6:
+            inet_protocol = socket.AF_INET6
+
+        self.create_socket(inet_protocol, socket.SOCK_STREAM)
         
         if self.use_ssl:
             self.send = self._ssl_send
