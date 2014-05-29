@@ -17,6 +17,9 @@ Then run ./jenni again
 import sys, os, imp, optparse
 from textwrap import dedent as trim
 
+if os.geteuid() == 0:
+    sys.exit('Do not run jenni with root privileges.')
+
 dotdir = os.path.expanduser('~/.jenni')
 configpath = os.path.expanduser(dotdir + '/default.py')
 
