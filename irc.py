@@ -71,6 +71,11 @@ class Bot(asynchat.async_chat):
         self.name = name
         self.password = password
 
+        self.use_ssl = False
+        self.use_sasl = False
+        self.is_connected = False
+        self.is_authenticated = False
+
         self.verbose = True
         self.channels = channels or list()
         self.stack = list()
@@ -143,8 +148,7 @@ class Bot(asynchat.async_chat):
                 input = input.encode('utf-8')
         return input
 
-    def run(self, host, port=6667, use_ssl=False):
-        self.use_ssl = use_ssl
+    def run(self, host, port=6667):
         self.initiate_connect(host, port)
 
     def initiate_connect(self, host, port):
@@ -184,7 +188,10 @@ class Bot(asynchat.async_chat):
 
         if self.verbose:
             print >> sys.stderr, 'connected!'
-        if self.password:
+
+        self.write(('CAP', 'LS'))
+
+        if not self.use_sasl and self.password:
             self.write(('PASS', self.password))
         self.write(('NICK', self.nick))
         self.write(('USER', self.user, '+iw', self.nick), self.name)
@@ -197,6 +204,7 @@ class Bot(asynchat.async_chat):
         """ Replacement for self.send() during SSL connections. """
         """ Thank you - http://www.evanfosmark.com/2010/09/ssl-support-in-asynchatasync_chat/ """
         try:
+            print '<-- %s' % data
             result = self.socket.send(data)
             return result
         except ssl.SSLError, why:
@@ -214,6 +222,7 @@ class Bot(asynchat.async_chat):
             if not data:
                 self.handle_close()
                 return ''
+            print '--> %s' % data
             return data
         except ssl.SSLError, why:
             if why[0] in (asyncore.ECONNRESET, asyncore.ENOTCONN, 
