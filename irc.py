@@ -89,6 +89,11 @@ class Bot(asynchat.async_chat):
     # def push(self, *args, **kargs):
     #     asynchat.async_chat.push(self, *args, **kargs)
 
+    def initiate_send(self):
+        self.sending.acquire()
+        asynchat.async_chat.initiate_send(self)
+        self.sending.release()
+
     def handle_error(self):
         '''Handle any uncaptured error in the core. Overrides asyncore's handle_error
         This prevents the bot from disconnecting when it use to say something twice
@@ -190,11 +195,11 @@ class Bot(asynchat.async_chat):
             print >> sys.stderr, 'connected!'
 
         self.write(('CAP', 'LS'))
+        self.write(('NICK', self.nick))
+        self.write(('USER', self.user, '+iw', self.nick), self.name)
 
         if not self.use_sasl and self.password:
             self.write(('PASS', self.password))
-        self.write(('NICK', self.nick))
-        self.write(('USER', self.user, '+iw', self.nick), self.name)
 
     def handle_close(self):
         self.close()
@@ -219,10 +224,10 @@ class Bot(asynchat.async_chat):
         """ Thank you - http://www.evanfosmark.com/2010/09/ssl-support-in-asynchatasync_chat/ """
         try:
             data = self.read(buffer_size)
+            print '--> %s' % data
             if not data:
                 self.handle_close()
                 return ''
-            print '--> %s' % data
             return data
         except ssl.SSLError, why:
             if why[0] in (asyncore.ECONNRESET, asyncore.ENOTCONN, 
